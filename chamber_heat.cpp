@@ -20,8 +20,8 @@ int main() {
     double pulse_period     = 0.2;  // Period of the pulses [s]
 
     // 2D grid: assume num_cells = (ni-1)*(nj-1) and square grid
-    int ni = static_cast<int>(std::sqrt(num_cells)) + 1;  // nodes in x
-    int nj = static_cast<int>(std::sqrt(num_cells)) + 1;  // nodes in y
+    int ni = sqrt(num_cells) + 1;  // nodes in x
+    int nj = sqrt(num_cells) + 1;  // nodes in y
 
     double x0 = 0.1;  // origin x (for VTK)
     double y0 = 0.1;  // origin y
@@ -35,7 +35,7 @@ int main() {
     double* T     = new double[nn];
     double* T_new = new double[nn];
 
-    // Initial condition: T(x,y,0) = 300 K
+    // Initial condition: T(t=0,x) = 300 K
     double initial_temperature = 300.0;
     for (int n = 0; n < nn; ++n) {
         T[n] = initial_temperature;
@@ -52,7 +52,7 @@ int main() {
         bool thruster_on = false;
         if (current_time >= pulse_start_time) {
             double time_since_start = current_time - pulse_start_time;
-            double time_in_cycle = std::fmod(time_since_start, pulse_period);
+            double time_in_cycle = time_since_start / pulse_period;
             if (time_in_cycle < pulse_duration) {
                 thruster_on = true;
             }
