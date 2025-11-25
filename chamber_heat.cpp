@@ -3,13 +3,14 @@
 #include <cmath>      // for sqrt, fmod
 
 int main() {
-    double domain_length = 0.01;   // Length of the domain in meters (x and y)
+    // simulation parameters
+    double L = 0.01;   // Length of the domain in meters (x and y)
     double dt = 1e-4;              // Time step in seconds
     int num_cells = 100;           // Total spatial cells (we'll use sqrt for 2D)
     int num_time_steps = 15000;    // Number of time steps
 
     // material properties
-    double k   = 65.0;     // Thermal conductivity [W/(m·K)]
+    double K   = 65.0;     // Thermal conductivity [W/(m·K)]
     double alpha = 1.7e-5; // Thermal diffusivity [m^2/s]
     double hg  = 1.5e4;    // Convective heat transfer coefficient [W/(m^2·K)]
     double T0g = 2500.0;   // Gas stagnation temperature [K]
@@ -19,157 +20,122 @@ int main() {
     double pulse_duration   = 0.15; // Duration of each pulse [s]
     double pulse_period     = 0.2;  // Period of the pulses [s]
 
-    // 2D grid: assume num_cells = (ni-1)*(nj-1) and square grid
-    int ni = sqrt(num_cells) + 1;  // nodes in x
-    int nj = sqrt(num_cells) + 1;  // nodes in y
+    // 1D domain parameters
+    int n = num_cells + 1;  // nodes in x direction
+    double dx = L / num_cells;  // cell spacing in x
 
-    double x0 = 0.1;  // origin x (for VTK)
-    double y0 = 0.1;  // origin y
-
-    double dx = domain_length / (ni - 1);  // cell spacing in x
-    double dy = domain_length / (nj - 1);  // cell spacing in y
-
-    int nn = ni * nj;  // total number of nodes
-
-    // --- Allocate temperature arrays ---
-    double* T     = new double[nn];
-    double* T_new = new double[nn];
-
-    // Initial condition: T(t=0,x) = 300 K
-    double initial_temperature = 300.0;
-    for (int n = 0; n < nn; ++n) {
-        T[n] = initial_temperature;
+    // --- Allocate temperature matrix ---
+    // Allocate an array of pointers (for rows)
+    int rows = num_time_steps + 1;
+    int cols = n;
+    double** T = new double*[rows];
+    for (int i = 0; i < rows; ++i) {
+        T[i] = new double[cols];
     }
 
-    double dxsqr = dx * dx;
-    double dysqr = dy * dy;
+    // Initial condition: T(t=0, x) = 300 K
+    double initial_temperature = 300.0;
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            T[i][j] = initial_temperature;
+        }
+    }
 
-    // ----- Time marching -----
-    for (int t_step = 0; t_step < num_time_steps; ++t_step) {
-        double current_time = t_step * dt;
+    // ----- Main Loop -----
+    for (int k = 0; k < num_time_steps; ++k) {
+        // logic to determine if thruster is on or off
+        double current_time = k * dt;
 
-        // Determine if the thruster is on or off based on the pulse parameters
         bool thruster_on = false;
+
         if (current_time >= pulse_start_time) {
             double time_since_start = current_time - pulse_start_time;
-            double time_in_cycle = time_since_start / pulse_period;
-            if (time_in_cycle < pulse_duration) {
-                thruster_on = true;
-            }
+
+            // Time within the current pulse cycle [0, pulse_period)
+            double time_in_cycle = fmod(time_since_start, pulse_period);
+
+            // Thruster is ON during the first 'pulse_duration' of each period
+            thruster_on = (time_in_cycle < pulse_duration);
         }
 
-        // --------------------------------------------------------
-        // 1) Apply boundary conditions on T (OLD field)
-        // --------------------------------------------------------
-
-        // Left boundary (i = 0): convective BC when thruster ON, zero-gradient when OFF
-        for (int j = 0; j < nj; ++j) {
-            int i0 = 0;
-            int i1 = 1;
-            int id0 = j * ni + i0;
-            int id1 = j * ni + i1;
-
-            if (thruster_on) {
-                // dT/dx = (hg/k)*(T0g - T(i=0))
-                double dTdx = (hg / k) * (T0g - T[id0]);
-                // (T1 - T0)/dx = dTdx  ->  T1 = T0 + dx * dTdx
-                T[id1] = T[id0] + dx * dTdx;
-            } else {
-                // dT/dx = 0  ->  T1 = T0
-                T[id1] = T[id0];
-            }
-        }
-
-        // Right boundary (i = ni-1): zero-gradient dT/dx = 0
-        for (int j = 0; j < nj; ++j) {
-            int iR  = ni - 1;
-            int iRm = ni - 2;
-            int idR  = j * ni + iR;
-            int idRm = j * ni + iRm;
-            T[idR] = T[idRm];
-        }
-
-        // Bottom boundary (j = 0): zero-gradient dT/dy = 0
-        for (int i = 0; i < ni; ++i) {
-            int j0 = 0;
-            int j1 = 1;
-            int id0 = j0 * ni + i;
-            int id1 = j1 * ni + i;
-            T[id0] = T[id1];
-        }
-
-        // Top boundary (j = nj-1): zero-gradient dT/dy = 0
-        for (int i = 0; i < ni; ++i) {
-            int jT  = nj - 1;
-            int jTm = nj - 2;
-            int idT  = jT * ni + i;
-            int idTm = jTm * ni + i;
-            T[idT] = T[idTm];
-        }
-
-        // --------------------------------------------------------
-        // 2) FTCS update for interior nodes (1 <= i <= ni-2, 1 <= j <= nj-2)
-        // --------------------------------------------------------
-        for (int j = 1; j < nj - 1; ++j) {
-            for (int i = 1; i < ni - 1; ++i) {
-                int id  = j * ni + i;
-                int idL = j * ni + (i - 1);
-                int idR = j * ni + (i + 1);
-                int idD = (j - 1) * ni + i;
-                int idU = (j + 1) * ni + i;
-
-                double d2Tdx2 = (T[idL] - 2.0 * T[id] + T[idR]) / dxsqr;
-                double d2Tdy2 = (T[idD] - 2.0 * T[id] + T[idU]) / dysqr;
-
-                T_new[id] = T[id] + dt * alpha * (d2Tdx2 + d2Tdy2);
-            }
-        }
-
-        // --------------------------------------------------------
-        // 3) Copy boundary values into T_new directly from T
-        // (they already satisfy the BCs)
-        // --------------------------------------------------------
-        for (int j = 0; j < nj; ++j) {
-            for (int i = 0; i < ni; ++i) {
-                if (i == 0 || i == ni - 1 || j == 0 || j == nj - 1) {
-                    int id = j * ni + i;
-                    T_new[id] = T[id];
+        // spatial loop
+        for (int i = 0; i < n; ++i) {
+            // boundary conditions
+            if (i == 0) { // left boundary
+                if (thruster_on) {
+                    double dTdx = (hg / K) * (T0g - T[k][i]);
+                    T[k+1][0] = T[k][0] + dTdx * dx;
+                    continue;
+                } else {
+                    T[k+1][i] = T[k][i]; // insulated boundary
+                    continue;
                 }
             }
+            if (i == n-1) { // right boundary
+                T[k+1][i] = T[k][i]; // insulated boundary
+                continue;
+            }
+
+            // interior points
+            T[k+1][i] = T[k][i] + alpha * dt * 
+                (T[k][i+1] - 2*T[k][i] + T[k][i-1]) / (dx * dx);
         }
 
-        // --------------------------------------------------------
-        // 4) Swap T_new → T for the next time step
-        // --------------------------------------------------------
-        for (int n = 0; n < nn; ++n) {
-            T[n] = T_new[n];
-        }
     }
 
     // ----- Output VTI file -----
+    int nt_vis  = 100;                 // desired number of time samples for plotting
+    int stride  = rows / nt_vis;
+    if (stride < 1) stride = 1;
+    nt_vis = rows / stride;            // recompute actual number of slices we’ll output
+
+    double total_time = num_time_steps * dt;
+    double dy_vis = (nt_vis > 1) ? total_time / (nt_vis - 1) : dt;  // spacing in time for the VTI
+
+
     std::ofstream out("field.vti");
 
-    out << "<VTKFile type=\"ImageData\">\n";
-    out << "<ImageData WholeExtent=\"0 " << ni-1
-        << " 0 " << nj-1 << " 0 0\"";
-    out << " Origin=\"" << x0 << " " << y0 << " " << 0.0 << "\"";
-    out << " Spacing=\"" << dx << " " << dy << " " << 0.0 << "\">\n";
-    out << "<Piece Extent=\"0 " << ni-1
-        << " 0 " << nj-1 << " 0 0\">\n";
-    out << "<PointData>\n";
+    out << "<?xml version=\"1.0\"?>\n";
+    out << "<VTKFile type=\"ImageData\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
 
-    out << "<DataArray Name=\"T\" NumberOfComponents=\"1\" format=\"ascii\" type=\"Float64\">\n";
-    for (int n = 0; n < nn; n++) out << T[n] << " ";
-    out << "\n</DataArray>\n";
+    // x: space, 0..cols-1, spacing = dx
+    // y: time (downsampled), 0..nt_vis-1, spacing = dy_vis
+    // z: single slice
+    out << "<ImageData WholeExtent=\"0 " << cols - 1
+        << " 0 " << nt_vis - 1
+        << " 0 0\" "
+        << "Origin=\"0 0 0\" "
+        << "Spacing=\"" << dx << " " << dy_vis << " 1\">\n";
 
+    out << "<Piece Extent=\"0 " << cols - 1
+        << " 0 " << nt_vis - 1
+        << " 0 0\">\n";
+
+    out << "<PointData Scalars=\"T\">\n";
+    out << "<DataArray type=\"Float64\" Name=\"T\" NumberOfComponents=\"1\" format=\"ascii\">\n";
+
+    // ivis indexes the *visual* time slices
+    for (int ivis = 0; ivis < nt_vis; ++ivis) {
+        int k = ivis * stride;   // map to actual simulation time index (row in T)
+
+        for (int i = 0; i < cols; ++i) {   // spatial index
+            out << T[k][i] << " ";
+        }
+        out << "\n";
+    }
+
+    out << "</DataArray>\n";
     out << "</PointData>\n";
     out << "</Piece>\n";
     out << "</ImageData>\n";
     out << "</VTKFile>\n";
 
-    // free arrays
-    delete[] T;
-    delete[] T_new;
+    out.close();
 
-    return 0; // normal exit
+    // ----- Free memory -----
+    for (int i = 0; i < rows; i++) {
+        delete[] T[i];
+    }
+    delete[] T;
+    return 0;
 }
