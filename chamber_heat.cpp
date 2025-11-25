@@ -1,126 +1,96 @@
-#include <iostream>   // for screen output
-#include <fstream>    // for file writing
-#include <cmath>      // for sqrt, fmod
+#include <iostream>
+#include <fstream>
+#include <cmath>
+
+#define IDX(n,i,N) ((n)*(N) + (i))   // flatten time n, space i
 
 int main() {
-    // simulation parameters
-    double L = 0.01;   // Length of the domain in meters (x and y)
-    double dt = 1e-4;              // Time step in seconds
-    int num_cells = 100;           // Total spatial cells (we'll use sqrt for 2D)
-    int num_time_steps = 15000;    // Number of time steps
 
-    // material properties
-    double K   = 65.0;     // Thermal conductivity [W/(m·K)]
-    double alpha = 1.7e-5; // Thermal diffusivity [m^2/s]
-    double hg  = 1.5e4;    // Convective heat transfer coefficient [W/(m^2·K)]
-    double T0g = 2500.0;   // Gas stagnation temperature [K]
+    // Parameters
+    double L  = 0.01;
+    int    N  = 101;
+    double dx = L / (N - 1);
+    double dt = 1e-4;
+    int    nt = 15000;
 
-    // pulse parameters
-    double pulse_start_time = 0.0;  // Time when pulses begin [s]
-    double pulse_duration   = 0.15; // Duration of each pulse [s]
-    double pulse_period     = 0.2;  // Period of the pulses [s]
+    double alpha = 1.7e-5;
+    double k     = 65.0;
+    double hg    = 1.5e4;
+    double T0g   = 2500.0;
 
-    // 1D domain parameters
-    int n = num_cells + 1;  // nodes in x direction
-    double dx = L / num_cells;  // cell spacing in x
+    double r = alpha * dt / (dx * dx);
 
-    // --- Allocate temperature matrix ---
-    // Allocate an array of pointers (for rows)
-    int rows = num_time_steps + 1;
-    int cols = n;
-    double** T = new double*[rows];
-    for (int i = 0; i < rows; ++i) {
-        T[i] = new double[cols];
-    }
+    // allocate memory: full 2D field (time × space)
+    double *T    = new double[N * nt];
+    double *Tnew = new double[N];
 
-    // Initial condition: T(t=0, x) = 300 K
-    double initial_temperature = 300.0;
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            T[i][j] = initial_temperature;
-        }
-    }
+    // initial condition at t = 0
+    for (int i = 0; i < N; i++)
+        T[IDX(0,i,N)] = 300.0;
 
-    // ----- Main Loop -----
-    for (int k = 0; k < num_time_steps; ++k) {
-        // logic to determine if thruster is on or off
-        double current_time = k * dt;
+    // ---- TIME LOOP ----
+    for (int n = 0; n < nt-1; n++) {
 
-        bool thruster_on = false;
+        double time = n * dt;
+        bool thruster_on = fmod(time, 0.2) < 0.15;
 
-        if (current_time >= pulse_start_time) {
-            double time_since_start = current_time - pulse_start_time;
+        double* Told  = &T[IDX(n,0,N)];
+        double* Tnext = Tnew;
 
-            // Time within the current pulse cycle [0, pulse_period)
-            double time_in_cycle = fmod(time_since_start, pulse_period);
-
-            // Thruster is ON during the first 'pulse_duration' of each period
-            thruster_on = (time_in_cycle < pulse_duration);
+        // ghost node at x<0
+        double Tghost;
+        if (thruster_on) {
+            Tghost = Told[1] - 2*dx*(hg/k)*(T0g - Told[0]);
+        } else {
+            Tghost = Told[1];
         }
 
-        // spatial loop
-        for (int i = 0; i < n; ++i) {
-            // boundary conditions
-            if (i == 0) { // left boundary
-                if (thruster_on) {
-                    double dTdx = (hg / K) * (T0g - T[k][i]);
-                    T[k+1][0] = T[k][0] + dTdx * dx;
-                    continue;
-                } else {
-                    T[k+1][i] = T[k][i]; // insulated boundary
-                    continue;
-                }
-            }
-            if (i == n-1) { // right boundary
-                T[k+1][i] = T[k][i]; // insulated boundary
-                continue;
-            }
+        // left boundary
+        Tnext[0] = Told[0] + r*(Told[1] - 2*Told[0] + Tghost);
 
-            // interior points
-            T[k+1][i] = T[k][i] + alpha * dt * 
-                (T[k][i+1] - 2*T[k][i] + T[k][i-1]) / (dx * dx);
+        // interior
+        for (int i = 1; i < N-1; i++) {
+            Tnext[i] = Told[i] + r*(Told[i+1] - 2*Told[i] + Told[i-1]);
         }
 
+        // right boundary (Neumann 0)
+        Tnext[N-1] = Tnext[N-2];
+
+        // store next row
+        for (int i = 0; i < N; i++)
+            T[IDX(n+1,i,N)] = Tnext[i];
     }
 
-    // ----- Output VTI file -----
-    int nt_vis  = 100;                 // desired number of time samples for plotting
-    int stride  = rows / nt_vis;
-    if (stride < 1) stride = 1;
-    nt_vis = rows / stride;            // recompute actual number of slices we’ll output
+    // total simulated time (for reference)
+    double total_time = (nt - 1) * dt;   // ~1.5 s
 
-    double total_time = num_time_steps * dt;
-    double dy_vis = (nt_vis > 1) ? total_time / (nt_vis - 1) : dt;  // spacing in time for the VTI
-
-
+    // ---- WRITE VTI ----
     std::ofstream out("field.vti");
 
     out << "<?xml version=\"1.0\"?>\n";
     out << "<VTKFile type=\"ImageData\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
 
-    // x: space, 0..cols-1, spacing = dx
-    // y: time (downsampled), 0..nt_vis-1, spacing = dy_vis
-    // z: single slice
-    out << "<ImageData WholeExtent=\"0 " << cols - 1
-        << " 0 " << nt_vis - 1
+    // WholeExtent: index ranges
+    // x: 0..N-1 (space), y: 0..nt-1 (time), z: 0..0
+    out << "<ImageData WholeExtent=\"0 " << (N-1)
+        << " 0 " << (nt-1)
         << " 0 0\" "
+        // Origin: (x=0 m, t=0 s, z=0)
         << "Origin=\"0 0 0\" "
-        << "Spacing=\"" << dx << " " << dy_vis << " 1\">\n";
+        // Spacing: dx in meters, dt in seconds, 1 in z
+        << "Spacing=\"" << dx << " " << dt << " 1\">\n";
 
-    out << "<Piece Extent=\"0 " << cols - 1
-        << " 0 " << nt_vis - 1
+    out << "<Piece Extent=\"0 " << (N-1)
+        << " 0 " << (nt-1)
         << " 0 0\">\n";
 
-    out << "<PointData Scalars=\"T\">\n";
+    out << "<PointData Scalars=\"Temperature\">\n";
     out << "<DataArray type=\"Float64\" Name=\"T\" NumberOfComponents=\"1\" format=\"ascii\">\n";
 
-    // ivis indexes the *visual* time slices
-    for (int ivis = 0; ivis < nt_vis; ++ivis) {
-        int k = ivis * stride;   // map to actual simulation time index (row in T)
-
-        for (int i = 0; i < cols; ++i) {   // spatial index
-            out << T[k][i] << " ";
-        }
+    // row-major: loop over time (rows), then space (columns)
+    for (int n = 0; n < nt; n++) {
+        for (int i = 0; i < N; i++)
+            out << T[IDX(n,i,N)] << " ";
         out << "\n";
     }
 
@@ -132,10 +102,8 @@ int main() {
 
     out.close();
 
-    // ----- Free memory -----
-    for (int i = 0; i < rows; i++) {
-        delete[] T[i];
-    }
     delete[] T;
+    delete[] Tnew;
+
     return 0;
 }
