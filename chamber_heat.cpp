@@ -55,11 +55,12 @@ int main() {
     std::ofstream file("pulse.csv");
     file << "time,thruster\n";   // header
 
-    for (int k=0; k<=nsteps; k++)
+    for (int k=0; k<=nsteps; k++) {
         file << t[k] << "," << x[k] << "\n";
-
+    }
     file.close();
 
+    // free memory
     delete[] t;
     delete[] x;
 
