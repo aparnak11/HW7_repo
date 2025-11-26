@@ -7,11 +7,14 @@ int main() {
     double dt = 1e-4; // time step in seconds
     double ncells = 100; // number of cells
     double nsteps = 15000; // number of time steps
+    double dx = L / ncells; // cell size in meters
 
-    // initial conditions
-    double *T = new double[ncells*ncells];
+    // forward time with initial conditions
+    double *T = new double[ncells*nsteps];
+    double *Tnew = new double[ncells*nsteps];
     for (int i=0; i<ncells*ncells; i++) {
         T[i] = 300.0; // initial temperature in K
+        Tnew[i] = 300.0; // initial temperature in K
     }
 
     // pulse parameters
@@ -49,9 +52,52 @@ int main() {
         } else {
             x[k] = 0;
         }
+
+        // main heat map loop
+        for (int i=0; i<=ncells; i++) {
+            if (i == 0) { // left boundary
+                if (thruster_on) {
+                    // thruster on boundary condition
+                    double dTdx = (hg/k_cond) * (Tog - T[i]);
+                    Tnew[i] = T[i] + dTdx * dx; // forward difference
+                    continue;
+                } else {
+                    // thruster off boundary condition
+                    Tnew[i] = T[i];
+                    continue;
+                }
+            } else if (i == ncells) { // right boundary
+                Tnew[i] = T[i]; // insulated boundary condition
+                continue;
+            }
+
+            // interior points
+            Tnew[i] = T[i] + alpha * dt / (dx * dx) * (T[i+1] - 2*T[i] + T[i-1]);
+        }
     }
 
     // vti output
+    double x0 = 0.1;
+    double y0 = 0.1;
+
+    std::ofstream out("field.vti");
+
+    out<<"<VTKFile type=\"ImageData\">\n";
+    out << "<ImageData WholeExtent=\"0 " << ncells << " 0 " << ncells << " 0 0\"";
+    out<<" Origin=\""<<x0<<" "<<y0<<" "<<0.0<<"\"";
+    out<<" Spacing=\""<<dx<<" " <<dx<<" "<<0.0<<"\">\n";
+    out<<"<Piece Extent=\"0 "<<ncells<<" 0 "<<nsteps<<" 0 "<<0<<"\">\n";
+    out<<"<PointData>\n";
+
+    out<<"<DataArray Name=\"T\" NumberOfComponents=\"1\" format=\"ascii\" type=\"Float64\">\n";
+    for (int n=0; n<ncells*nsteps; n++) out<<T[n]<<" ";
+    out<<"\n</DataArray>\n";
+
+    out<<"</PointData>\n";
+    out<<"</Piece>\n";
+    out<<"</ImageData>\n";
+    out<<"</VTKFile>\n";
+
     // ---- Dump pulse schedule to CSV ---- //
     std::ofstream file("pulse.csv");
     file << "time,thruster\n";   // header
@@ -64,6 +110,8 @@ int main() {
     // free memory
     delete[] t;
     delete[] x;
+    delete[] T;
+    delete[] Tnew;
 
 
     return 0;
