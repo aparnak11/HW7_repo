@@ -43,6 +43,7 @@ int main() {
             thruster_on = true; // thruster is on during this time step
         }
 
+        // set pulse schedule
         if (thruster_on) {
             x[k] = 1;
         } else {
