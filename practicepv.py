@@ -1,5 +1,5 @@
 import pyvista as pv
-
+""" 
 cyl = pv.Cylinder()
 arrow = pv.Arrow()
 sphere = pv.Sphere()
@@ -31,7 +31,10 @@ pl.add_mesh(cone, color="tan", show_edges=True)
 pl.subplot(2, 1)
 pl.add_mesh(poly, color="tan", show_edges=True)
 pl.subplot(2, 2)
-pl.add_mesh(disc, color="tan", show_edges=True)
+pl.add_mesh(disc, color="tan", show_edges=True) """
+
+pl = pv.Plotter()
+pl.add_mesh(pv.ParametricRandomHills().elevation())
 # Render all of them
 pl.show()
 # Export this plotter as an interactive scene to a HTML file.
