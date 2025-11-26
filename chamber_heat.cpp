@@ -1,109 +1,68 @@
 #include <iostream>
-#include <fstream>
-#include <cmath>
-
-#define IDX(n,i,N) ((n)*(N) + (i))   // flatten time n, space i
+#include <fstream>          // for file writing
 
 int main() {
+    // simulation parameters
+    double L = 0.01; // length in meters
+    double dt = 1e-4; // time step in seconds
+    double ncells = 100; // number of cells
+    double nsteps = 15000; // number of time steps
 
-    // Parameters
-    double L  = 0.01;
-    int    N  = 101;
-    double dx = L / (N - 1);
-    double dt = 1e-4;
-    int    nt = 15000;
+    // initial conditions
+    double *T = new double[ncells*ncells];
+    for (int i=0; i<ncells*ncells; i++) {
+        T[i] = 300.0; // initial temperature in K
+    }
 
-    double alpha = 1.7e-5;
-    double k     = 65.0;
-    double hg    = 1.5e4;
-    double T0g   = 2500.0;
+    // pulse parameters
+    double pulse_start_time = 0.0; // pulse start time in seconds
+    double pulse_duration = 0.15; // pulse end time in seconds
+    double pulse_period = 0.2; // pulse period in seconds
 
-    double r = alpha * dt / (dx * dx);
+    // material properties
+    double k_cond = 65.0; // thermal conductivity in W/m-K
+    double alpha = 1.7e-5; // thermal diffusivity in m^2/s
+    double hg = 1.5e4; // convective heat transfer coefficient in W/m^2-K
+    double Tog = 2500.0; // hot gas temperature in K
 
-    // allocate memory: full 2D field (time × space)
-    double *T    = new double[N * nt];
-    double *Tnew = new double[N];
+    // boof pulse schedule
+    int *x = new int[nsteps+1];
+    for (int i=0; i<=nsteps; i++) {
+        x[i] = 0; // initialize all time steps to thruster off
+    }
 
-    // initial condition at t = 0
-    for (int i = 0; i < N; i++)
-        T[IDX(0,i,N)] = 300.0;
+    double *t = new double[nsteps+1];
 
-    // ---- TIME LOOP ----
-    for (int n = 0; n < nt-1; n++) {
+    for (int k=0; k<=nsteps; k++) {
+        t[k] = k * dt; // time array
 
-        double time = n * dt;
-        bool thruster_on = fmod(time, 0.2) < 0.15;
+        bool thruster_on = false;
+        double current_time = k * dt;
+        double time_in_cycle = fmod(current_time, pulse_period);
+        if (time_in_cycle >= pulse_start_time && time_in_cycle < (pulse_start_time + pulse_duration)) {
+            thruster_on = true; // thruster is on during this time step
+        }
 
-        double* Told  = &T[IDX(n,0,N)];
-        double* Tnext = Tnew;
-
-        // ghost node at x<0
-        double Tghost;
         if (thruster_on) {
-            Tghost = Told[1] - 2*dx*(hg/k)*(T0g - Told[0]);
+            x[k] = 1;
         } else {
-            Tghost = Told[1];
+            x[k] = 0;
         }
-
-        // left boundary
-        Tnext[0] = Told[0] + r*(Told[1] - 2*Told[0] + Tghost);
-
-        // interior
-        for (int i = 1; i < N-1; i++) {
-            Tnext[i] = Told[i] + r*(Told[i+1] - 2*Told[i] + Told[i-1]);
-        }
-
-        // right boundary (Neumann 0)
-        Tnext[N-1] = Tnext[N-2];
-
-        // store next row
-        for (int i = 0; i < N; i++)
-            T[IDX(n+1,i,N)] = Tnext[i];
     }
 
-    // total simulated time (for reference)
-    double total_time = (nt - 1) * dt;   // ~1.5 s
+    // vti output
+    // ---- Dump pulse schedule to CSV ---- //
+    std::ofstream file("pulse.csv");
+    file << "time,thruster\n";   // header
 
-    // ---- WRITE VTI ----
-    std::ofstream out("field.vti");
+    for (int k=0; k<=nsteps; k++)
+        file << t[k] << "," << x[k] << "\n";
 
-    out << "<?xml version=\"1.0\"?>\n";
-    out << "<VTKFile type=\"ImageData\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
+    file.close();
 
-    // WholeExtent: index ranges
-    // x: 0..N-1 (space), y: 0..nt-1 (time), z: 0..0
-    out << "<ImageData WholeExtent=\"0 " << (N-1)
-        << " 0 " << (nt-1)
-        << " 0 0\" "
-        // Origin: (x=0 m, t=0 s, z=0)
-        << "Origin=\"0 0 0\" "
-        // Spacing: dx in meters, dt in seconds, 1 in z
-        << "Spacing=\"" << dx << " " << dt << " 1\">\n";
+    delete[] t;
+    delete[] x;
 
-    out << "<Piece Extent=\"0 " << (N-1)
-        << " 0 " << (nt-1)
-        << " 0 0\">\n";
-
-    out << "<PointData Scalars=\"Temperature\">\n";
-    out << "<DataArray type=\"Float64\" Name=\"T\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-
-    // row-major: loop over time (rows), then space (columns)
-    for (int n = 0; n < nt; n++) {
-        for (int i = 0; i < N; i++)
-            out << T[IDX(n,i,N)] << " ";
-        out << "\n";
-    }
-
-    out << "</DataArray>\n";
-    out << "</PointData>\n";
-    out << "</Piece>\n";
-    out << "</ImageData>\n";
-    out << "</VTKFile>\n";
-
-    out.close();
-
-    delete[] T;
-    delete[] Tnew;
 
     return 0;
 }
