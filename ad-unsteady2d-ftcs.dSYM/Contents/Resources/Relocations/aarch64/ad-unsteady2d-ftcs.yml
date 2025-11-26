@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/aparnakrishnan/miniforge3/envs/aste404/HW7/HW7_repo/ad-unsteady2d-ftcs'
+relocations:     []
+...
