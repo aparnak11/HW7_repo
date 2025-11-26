@@ -12,7 +12,7 @@ int main() {
     // forward time with initial conditions
     double *T = new double[ncells*nsteps];
     double *Tnew = new double[ncells*nsteps];
-    for (int i=0; i<ncells*ncells; i++) {
+    for (int i=0; i<ncells*nsteps; i++) {
         T[i] = 300.0; // initial temperature in K
         Tnew[i] = 300.0; // initial temperature in K
     }
@@ -59,7 +59,7 @@ int main() {
                 if (thruster_on) {
                     // thruster on boundary condition
                     double dTdx = (hg/k_cond) * (Tog - T[i]);
-                    Tnew[i] = T[i] + dTdx * dx; // forward difference
+                    Tnew[i] = T[i] +  alpha * dt * (T[i+1] - 2*T[i]) * dTdx / dx; // forward difference
                     continue;
                 } else {
                     // thruster off boundary condition
@@ -72,7 +72,9 @@ int main() {
             }
 
             // interior points
-            Tnew[i] = T[i] + alpha * dt / (dx * dx) * (T[i+1] - 2*T[i] + T[i-1]);
+            Tnew[i] = T[i] + alpha * dt * (T[i+1] - 2*T[i] + T[i-1]) / (dx * dx);
+
+            //T[i] = Tnew[i]; // update temperature array for next time step
         }
     }
 
@@ -85,7 +87,7 @@ int main() {
     out<<"<VTKFile type=\"ImageData\">\n";
     out << "<ImageData WholeExtent=\"0 " << ncells << " 0 " << ncells << " 0 0\"";
     out<<" Origin=\""<<x0<<" "<<y0<<" "<<0.0<<"\"";
-    out<<" Spacing=\""<<dx<<" " <<dx<<" "<<0.0<<"\">\n";
+    out<<" Spacing=\""<<dx<<" " <<dt<<" "<<0.0<<"\">\n";
     out<<"<Piece Extent=\"0 "<<ncells<<" 0 "<<nsteps<<" 0 "<<0<<"\">\n";
     out<<"<PointData>\n";
 
